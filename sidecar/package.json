@@ -1,0 +1,27 @@
+{
+  "name": "@xyne/island-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Feeds the Xyne Island notch app from Xyne Spaces.",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types --no-warnings src/main.ts",
+    "scenes": "node --experimental-strip-types --no-warnings src/scenes.ts",
+    "demo": "node --experimental-strip-types --no-warnings src/demo.ts",
+    "reset": "node --experimental-strip-types --no-warnings -e \"import('./src/scenes.ts').then(m => m.resetScenes())\"",
+    "token": "spaces token --env \"$HOME/.config/xyne-island/env\"",
+    "token:update": "spaces token --update --env \"$HOME/.config/xyne-island/env\"",
+    "token:status": "spaces token --status --env \"$HOME/.config/xyne-island/env\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@xyne/spaces-sdk": "file:./vendor/xyne-spaces-sdk"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

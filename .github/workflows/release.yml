@@ -1,0 +1,369 @@
+name: Release
+
+# Push a tag like v0.2.0 and this produces a universal .dmg attached to a draft
+# GitHub release.
+#
+# Two modes, chosen automatically by whether the signing secrets exist:
+#
+#   secrets present  signed with Developer ID, notarized, stapled. Opens with
+#                    no warning and no workaround.
+#   secrets absent   ad-hoc signed. macOS quarantines the download, so the
+#                    release notes tell the user to clear the quarantine flag,
+#                    and the release is marked a prerelease.
+#
+# Required repository secrets for a signed release:
+#   MACOS_CERTIFICATE_P12       base64 of the Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD  password used when exporting that .p12
+#   MACOS_SIGNING_IDENTITY      e.g. "Developer ID Application: Name (TEAMID)"
+#   APPLE_API_KEY_P8            base64 of the App Store Connect .p8 key
+#   APPLE_API_KEY_ID            the key's ID
+#   APPLE_API_ISSUER_ID         the issuer UUID
+#
+# See docs/releasing.md for how to produce each one.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, notarize, and draft release
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '22'
+
+      - name: Record toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          node --version
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          plist_version="$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)"
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            version="${tag#v}"
+            # A tag may carry a prerelease suffix the bundle version does not.
+            base="${version%%-*}"
+            if [[ "$base" != "$plist_version" ]]; then
+              echo "::error::Tag $tag implies version $base but Resources/Info.plist says $plist_version. Update CFBundleShortVersionString and CHANGELOG.md together, per docs/releasing.md."
+              exit 1
+            fi
+            if [[ "$version" == *-* ]]; then
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            tag=""
+            version="$plist_version"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building version $version${tag:+ from tag $tag}"
+
+      - name: Test with warnings as errors
+        run: swift test -Xswiftc -warnings-as-errors
+
+      - name: Typecheck the bridge
+        working-directory: sidecar
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+
+      - name: Detect signing credentials
+        id: creds
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          NOTARY_KEY: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CERTIFICATE" ]]; then
+            echo "sign=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No MACOS_CERTIFICATE_P12 secret. Building an ad-hoc signed image; users will have to clear the quarantine flag by hand."
+          fi
+          if [[ -n "$NOTARY_KEY" ]]; then
+            echo "notarize=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "notarize=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No APPLE_API_KEY_P8 secret. Skipping notarization."
+          fi
+
+      - name: Import signing certificate
+        if: steps.creds.outputs.sign == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/xyne-island-signing.keychain-db"
+          # Ephemeral password for an ephemeral keychain on an ephemeral runner.
+          keychain_password="$(uuidgen)"
+          echo "KEYCHAIN_PATH=$keychain" >> "$GITHUB_ENV"
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$keychain" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/certificate.p12"
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychain -d user -s "$keychain" login.keychain-db
+
+      - name: Package universal app
+        env:
+          XYNE_ISLAND_UNIVERSAL: '1'
+          XYNE_ISLAND_VERSION: ${{ steps.version.outputs.version }}
+          XYNE_ISLAND_BUILD: ${{ github.run_number }}
+          XYNE_ISLAND_SIGNING_IDENTITY: ${{ steps.creds.outputs.sign == 'true' && secrets.MACOS_SIGNING_IDENTITY || '-' }}
+        run: ./scripts/package-app.sh
+
+      - name: Verify the bundle
+        run: |
+          set -euo pipefail
+          app="build/Xyne Island.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          test "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" = "in.juspay.xyne-island"
+          test "$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")" = "${{ steps.version.outputs.version }}"
+          lipo -archs "$app/Contents/MacOS/XyneIsland"
+          # A download missing the bridge is an app that can never connect.
+          test -f "$app/Contents/Resources/sidecar/src/main.ts"
+          test -f "$app/Contents/Resources/sidecar/node_modules/@xyne/spaces-sdk/dist/index.js"
+
+      - name: Prove the bundled bridge starts
+        run: |
+          set -euo pipefail
+          # No Spaces session on a runner, so the bridge must exit 78 ("needs
+          # sign-in") rather than crash. This is the last chance to catch a
+          # bundle whose bridge cannot even load its own imports.
+          set +e
+          XYNE_ISLAND_ENV="$RUNNER_TEMP/island-env" XYNE_NO_OPEN=1 \
+            node --experimental-strip-types --no-warnings \
+            "build/Xyne Island.app/Contents/Resources/sidecar/src/main.ts" > bridge.log 2>&1
+          status=$?
+          set -e
+          cat bridge.log
+          test "$status" = "78" \
+            || { echo "::error::Bundled bridge exited $status, expected 78"; exit 1; }
+
+      - name: Confirm Developer ID and hardened runtime
+        if: steps.creds.outputs.sign == 'true'
+        run: |
+          set -euo pipefail
+          details="$(codesign --display --verbose=4 "build/Xyne Island.app" 2>&1)"
+          echo "$details"
+          echo "$details" | grep -q 'Authority=Developer ID Application' \
+            || { echo "::error::App is not signed with a Developer ID Application certificate."; exit 1; }
+          echo "$details" | grep -q 'flags=.*runtime' \
+            || { echo "::error::Hardened Runtime is not enabled on the app bundle."; exit 1; }
+
+      - name: Notarize and staple the app
+        if: steps.creds.outputs.sign == 'true' && steps.creds.outputs.notarize == 'true'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+
+          # Stapling the app as well as the image means first launch succeeds
+          # offline, instead of needing to reach Apple for the ticket.
+          ditto -c -k --keepParent "build/Xyne Island.app" "$RUNNER_TEMP/XyneIsland.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/XyneIsland.zip" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" \
+            --wait \
+            --timeout 30m
+          xcrun stapler staple "build/Xyne Island.app"
+          xcrun stapler validate "build/Xyne Island.app"
+
+      - name: Build disk image
+        env:
+          XYNE_ISLAND_VERSION: ${{ steps.version.outputs.version }}
+          XYNE_ISLAND_SIGNING_IDENTITY: ${{ steps.creds.outputs.sign == 'true' && secrets.MACOS_SIGNING_IDENTITY || '-' }}
+        run: ./scripts/make-dmg.sh
+
+      - name: Notarize and staple the disk image
+        if: steps.creds.outputs.sign == 'true' && steps.creds.outputs.notarize == 'true'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          dmg="build/XyneIsland-${{ steps.version.outputs.version }}.dmg"
+          xcrun notarytool submit "$dmg" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" \
+            --wait \
+            --timeout 30m
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+
+      - name: Assess Gatekeeper acceptance
+        if: steps.creds.outputs.sign == 'true' && steps.creds.outputs.notarize == 'true'
+        run: |
+          set -euo pipefail
+          # This is what a downloader's Mac will decide. Fail here, not for them.
+          spctl --assess --type execute --verbose=4 "build/Xyne Island.app"
+
+      - name: Publish checksums
+        run: |
+          set -euo pipefail
+          cd build
+          shasum -a 256 "XyneIsland-${{ steps.version.outputs.version }}.dmg" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: xyne-island-${{ steps.version.outputs.version }}
+          path: |
+            build/XyneIsland-${{ steps.version.outputs.version }}.dmg
+            build/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Draft the release
+        if: steps.version.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          NOTARIZED: ${{ steps.creds.outputs.sign == 'true' && steps.creds.outputs.notarize == 'true' }}
+        run: |
+          set -euo pipefail
+          checksum="$(awk '{print $1}' build/SHA256SUMS.txt)"
+          repo_url="https://github.com/${GITHUB_REPOSITORY}/blob/$TAG"
+
+          cat > "$RUNNER_TEMP/notes.md" <<NOTES
+          ## Before you install
+
+          Xyne Island uses two things it does not bundle:
+
+          \`\`\`
+          node --version                      # 22.6 or newer
+          npm install -g @xyne/spaces-cli      # how it gets your Spaces token
+          \`\`\`
+
+          NOTES
+
+          if [[ "$NOTARIZED" == "true" ]]; then
+            cat >> "$RUNNER_TEMP/notes.md" <<NOTES
+          ## Install
+
+          Download \`XyneIsland-$VERSION.dmg\`, open it, and drag Xyne Island to Applications.
+
+          The app and the disk image are signed with a Developer ID certificate, notarized by Apple, and stapled, so Gatekeeper opens them without a warning and without a workaround.
+
+          Requires macOS 14 or later. Universal: Apple silicon and Intel.
+
+          ## Verify the download
+
+          \`\`\`
+          shasum -a 256 XyneIsland-$VERSION.dmg
+          # $checksum
+
+          spctl --assess --type execute -vv "/Applications/Xyne Island.app"
+          \`\`\`
+          NOTES
+          else
+            cat >> "$RUNNER_TEMP/notes.md" <<NOTES
+          > **This build is not notarized by Apple.** macOS will quarantine it, and opening it takes one extra command. That means you should check the checksum below rather than relying on macOS to vouch for the download.
+
+          ## Install
+
+          1. Download \`XyneIsland-$VERSION.dmg\`, open it, and drag Xyne Island to Applications.
+          2. Verify what you downloaded:
+
+             \`\`\`
+             shasum -a 256 ~/Downloads/XyneIsland-$VERSION.dmg
+             # $checksum
+             \`\`\`
+
+          3. Remove the quarantine flag macOS puts on downloaded apps:
+
+             \`\`\`
+             xattr -dr com.apple.quarantine "/Applications/Xyne Island.app"
+             \`\`\`
+
+          4. Open Xyne Island.
+
+          Requires macOS 14 or later. Universal: Apple silicon and Intel.
+
+          ### What step 3 does, and why you should care
+
+          macOS tags downloaded files with a \`com.apple.quarantine\` attribute and refuses to launch anything that is not notarized. That command removes the tag from this app only — \`-d com.apple.quarantine\` deletes exactly that one attribute rather than clearing everything.
+
+          It is also a real security control you are switching off, so do not run it on software you have not checked. Step 2 is the substitute here: it is the only thing establishing that your copy matches the one this workflow built. You can also [build from source](${repo_url}/README.md), which needs no workaround at all.
+
+          Notarized builds are the goal; the remaining steps are in [docs/releasing.md](${repo_url}/docs/releasing.md).
+          NOTES
+          fi
+
+          cat >> "$RUNNER_TEMP/notes.md" <<NOTES
+
+          ## First launch
+
+          Xyne Island has no window — it lives in the notch and the menu bar. On first launch it runs \`spaces token\` to read the Spaces session from the browser you are already signed in to, then starts showing what needs you. If you are signed out, the notch says so and the menu bar has **Refresh Spaces Token**.
+
+          Nothing leaves your machine except the Spaces API calls your own session already makes. See [PRIVACY.md](${repo_url}/PRIVACY.md) and [docs/install.md](${repo_url}/docs/install.md).
+
+          ## Changes
+
+          See [CHANGELOG.md](${repo_url}/CHANGELOG.md).
+          NOTES
+
+          args=(--draft --verify-tag --title "Xyne Island $VERSION" --notes-file "$RUNNER_TEMP/notes.md")
+          # An un-notarized download is a prerelease regardless of the tag.
+          if [[ "${{ steps.version.outputs.prerelease }}" == "true" || "$NOTARIZED" != "true" ]]; then
+            args+=(--prerelease)
+          fi
+
+          gh release create "$TAG" "${args[@]}" \
+            "build/XyneIsland-$VERSION.dmg" \
+            build/SHA256SUMS.txt
+
+          echo "::notice::Draft release created. Run the clean-machine install check in docs/releasing.md, then publish it."
+
+      - name: Clean up signing material
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/XyneIsland.zip"
+          if [[ -n "${KEYCHAIN_PATH:-}" && -f "${KEYCHAIN_PATH}" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi

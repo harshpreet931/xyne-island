@@ -1,0 +1,15 @@
+# Build output
+.build/
+build/
+DerivedData/
+
+# Dependencies (sidecar/vendor is committed on purpose: the SDK is not on a public registry)
+node_modules/
+marketing/video/out/
+
+# Credentials. The real one lives in ~/.config/xyne-island/env, never in the repo.
+.env
+*.env
+
+# macOS
+.DS_Store

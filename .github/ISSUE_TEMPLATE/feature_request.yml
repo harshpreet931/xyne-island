@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose a focused improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What should Xyne Island help you notice or answer that it does not today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: The smallest useful version. Which cast member carries it, and which state does it wear?
+    validations:
+      required: true
+  - type: dropdown
+    id: data
+    attributes:
+      label: Does this change what Xyne Island reads or writes?
+      options:
+        - "No"
+        - "Yes — described below"
+        - "Unsure"
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Data and failure behaviour
+      description: What is read from Spaces, what is kept, and what happens when that endpoint fails?

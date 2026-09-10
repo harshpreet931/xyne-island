@@ -1,0 +1,37 @@
+{
+  "name": "@xyne/spaces-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the Xyne Spaces API",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "xyne",
+    "spaces",
+    "sdk",
+    "api",
+    "client"
+  ],
+  "author": "Xyne",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xyne/xyne-spaces.git",
+    "directory": "packages/xyne-spaces-sdk"
+  }
+}

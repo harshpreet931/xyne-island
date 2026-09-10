@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Xyne Island app icon</title>
+  <desc id="desc">A paper tile with a black notch carrying the coral Xyne x.</desc>
+  <rect width="1024" height="1024" rx="228" fill="#F4F5F7"/>
+  <rect x="34" y="34" width="956" height="956" rx="198" fill="none" stroke="#15171C" stroke-opacity="0.10" stroke-width="8"/>
+  <rect x="128" y="330" width="768" height="364" rx="182" fill="#15171C"/>
+  <rect x="137" y="339" width="750" height="346" rx="173" fill="none" stroke="#F4F5F7" stroke-opacity="0.08" stroke-width="6"/>
+  <g stroke="#FF4F4F" stroke-width="64" stroke-linecap="round">
+    <path d="M400 420 L624 604"/>
+    <path d="M624 420 L400 604"/>
+  </g>
+  <rect x="470" y="640" width="84" height="22" rx="11" fill="#FFB847"/>
+</svg>

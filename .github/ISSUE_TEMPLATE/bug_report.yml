@@ -1,0 +1,69 @@
+name: Bug report
+description: Report reproducible Xyne Island behaviour that is not security-sensitive.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include tokens, credentials, private source, or Spaces message content.
+        Use SECURITY.md for anything security-sensitive.
+  - type: input
+    id: version
+    attributes:
+      label: Xyne Island version
+      description: Release version, or commit SHA if you built from source.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: "macOS version, Mac model, `node --version`, `spaces --help` works or not."
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where is it
+      options:
+        - The notch UI
+        - The bridge / connecting to Spaces
+        - Tokens and signing in
+        - Install, DMG, or launching
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Sanitized sample data only.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Bridge log
+      description: "Relevant lines from ~/Library/Logs/Xyne Island/sidecar.log. Remove message text and anything identifying."
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed tokens, credentials, private code, Spaces message content, and identifying paths.
+          required: true

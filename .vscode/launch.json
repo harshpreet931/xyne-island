@@ -1,0 +1,24 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:xyne-island}",
+      "name": "Debug XyneIsland",
+      "target": "XyneIsland",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug XyneIsland"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:xyne-island}",
+      "name": "Release XyneIsland",
+      "target": "XyneIsland",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release XyneIsland"
+    }
+  ]
+}

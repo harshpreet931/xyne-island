@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Test and package
+    runs-on: macos-15
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '22'
+
+      - name: Record toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          node --version
+
+      - name: Scan source for secrets
+        run: |
+          brew install gitleaks
+          gitleaks dir . --redact --no-banner
+
+      - name: Validate resources
+        run: |
+          plutil -lint Resources/Info.plist
+          find assets -name '*.svg' -print0 | xargs -0 xmllint --noout
+
+      - name: Test with warnings as errors
+        run: swift test -Xswiftc -warnings-as-errors
+
+      - name: Release build with warnings as errors
+        run: swift build -c release -Xswiftc -warnings-as-errors
+
+      - name: Typecheck the bridge
+        working-directory: sidecar
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+
+      - name: Package local app
+        run: ./scripts/package-app.sh
+
+      - name: Verify the bundle
+        run: |
+          set -euo pipefail
+          app="build/Xyne Island.app"
+          codesign --verify --deep --strict "$app"
+          test "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" = "in.juspay.xyne-island"
+          # A download missing the bridge is an app that can never connect.
+          test -f "$app/Contents/Resources/sidecar/src/main.ts"
+          test -f "$app/Contents/Resources/sidecar/node_modules/@xyne/spaces-sdk/dist/index.js"
+
+      - name: Prove the bundled bridge starts and reports a missing session
+        run: |
+          set -euo pipefail
+          # There is no Spaces session on a runner, so the bridge must exit 78
+          # ("needs sign-in") rather than crash or hang. XYNE_NO_OPEN stops the
+          # CLI from trying to open a browser.
+          set +e
+          XYNE_ISLAND_ENV="$RUNNER_TEMP/island-env" XYNE_NO_OPEN=1 \
+            node --experimental-strip-types --no-warnings \
+            "build/Xyne Island.app/Contents/Resources/sidecar/src/main.ts" > bridge.log 2>&1
+          status=$?
+          set -e
+          cat bridge.log
+          test "$status" = "78" \
+            || { echo "::error::Expected exit 78 with no Spaces session, got $status"; exit 1; }

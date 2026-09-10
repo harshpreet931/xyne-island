@@ -1,0 +1,26 @@
+{
+  "name": "xyne-island-video",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remotion compositions for Xyne Island launch assets",
+  "scripts": {
+    "dev": "remotion studio",
+    "hero": "remotion render HeroLoop out/xyne-island-hero-loop.mp4 --codec=h264 --crf=16 --pixel-format=yuv420p",
+    "hero:gif": "remotion render HeroLoop out/xyne-island-hero-loop.gif --codec=gif --every-nth-frame=3 --scale=0.75 --props=./gif-props.json",
+    "film": "remotion render LaunchFilm out/xyne-island-launch.mp4 --codec=h264 --crf=16 --pixel-format=yuv420p",
+    "assets": "npm run hero:gif && npm run film && cp out/xyne-island-hero-loop.gif ../../docs/xyne-island-hero-loop.gif && cp out/xyne-island-launch.mp4 ../../docs/xyne-island-launch.mp4",
+    "tour": "remotion render TourFilm out/xyne-island-tour-silent.mp4 --codec=h264 --crf=16 --pixel-format=yuv420p && npm run tour:sound",
+    "tour:sound": "python3 sound/tour-sound.py out/tour-sound.wav && ffmpeg -y -v error -i out/xyne-island-tour-silent.mp4 -i out/tour-sound.wav -map 0:v -map 1:a -c:v copy -c:a aac -b:a 160k -shortest out/xyne-island-tour.mp4 && cp out/xyne-island-tour.mp4 ../../docs/xyne-island-tour.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.505",
+    "@remotion/layout-utils": "4.0.505",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.505"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}
