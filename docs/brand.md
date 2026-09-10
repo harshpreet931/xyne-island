@@ -177,6 +177,18 @@ product cannot drift.
 | [`assets/launch-film.mp4`](../assets/launch-film.mp4) | Launch post, social |
 | [`assets/tour-film.mp4`](../assets/tour-film.mp4) | The full walkthrough, with sound |
 | [`assets/tour-film-silent.mp4`](../assets/tour-film-silent.mp4) | The same tour where sound would be rude |
+| [`assets/social-preview.png`](../assets/social-preview.png) | The repository's social preview (1280×640) and link cards |
+
+The social preview is rendered from [`marketing/social-preview.html`](../marketing/social-preview.html)
+at 2× and downsampled, so it can be regenerated when the brand moves:
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu \
+  --force-device-scale-factor=2 --window-size=1280,640 \
+  --screenshot=og.png marketing/social-preview.html
+```
+
+GitHub has no API for setting it — upload it under **Settings → General → Social preview**.
 
 These are interface recreations built from the real geometry, not screen
 captures. Describe them as such, and prefer real footage the moment there is
